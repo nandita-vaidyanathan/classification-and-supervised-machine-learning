@@ -1,0 +1,311 @@
+---
+title: "R Notebook"
+output: pdf_document
+editor_options: 
+  chunk_output_type: inline
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r}
+library(readr)
+library(dplyr)
+library(tidyverse)
+#install.packages("caret")
+library(caret)
+#install.packages("pROC")
+library(pROC)
+#install.packages("rpart")
+library(rpart)
+#install.packages("rpart.plot")
+library(rpart.plot)
+#install.packages("PRROC")
+library(PRROC)
+#install.packages('randomForest')
+library(randomForest)
+```
+Partition the data into training and testing datasets. What percentage of training data will you use?
+Please state the reason.
+```{r}
+marketing <- read_csv("https://raw.githubusercontent.com/domrongphol/SPE487/master/Homework/HW2/bank-full.csv")
+set.seed(123)
+random_sample <- createDataPartition(marketing$y,p = 0.8, list = FALSE)
+# Generating training dataset  
+training_dataset  <- marketing[random_sample, ] 
+
+# Generating testing dataset
+testing_dataset <- marketing[-random_sample, ] 
+training_dataset$y <- factor(training_dataset$y, levels = c("no", "yes"))
+testing_dataset$y <- factor(testing_dataset$y, levels = c("no", "yes"))
+
+
+# downsample imbalanced data set
+train_balanced <- downSample(x = training_dataset[, -ncol(training_dataset)], 
+                             y = training_dataset$y)
+names(train_balanced)[ncol(train_balanced)] <- "y"
+table(train_balanced$y)
+
+logit_model <- glm(y ~ age + job + marital + education + default + balance + housing + loan + duration +
+campaign + pdays + previous + poutcome, data = train_balanced, family = binomial)
+
+# predicting the target variable
+train_predictions <- predict(logit_model, train_balanced, type = "response")
+predictions <- predict(logit_model, testing_dataset, type = "response")
+
+# Convert probabilities to class labels based on a 0.5 threshold
+predicted_classes <- ifelse(predictions > 0.5, "yes", "no")
+predicted_classes_l <- ifelse(train_predictions > 0.5, "yes", "no")
+
+# Confusion Matrix
+conf_matrix_train <- confusionMatrix(as.factor(predicted_classes_l), as.factor(train_balanced$y))
+conf_matrix <- confusionMatrix(as.factor(predicted_classes), as.factor(testing_dataset$y))
+
+# Generate the ROC curve object
+roc_curve_train <- roc(train_balanced$y, train_predictions)
+roc_curve <- roc(testing_dataset$y, predictions)
+
+# Plot the ROC curve
+roc_logit_train <- plot(roc_curve_train, main = "ROC training data", col = "blue", lwd = 2)
+roc_logit <- plot(roc_curve, main = "ROC Curve for Logistic Regression", col = "blue", lwd = 2)
+
+# Calculate AUC
+auc_value_train <- auc(roc_logit_train)
+auc_value <- auc(roc_curve)
+```
+The data partition choice is 80-20 to ensure there is enough data for model training while keeping enough for robust testing. 
+
+The logit model has a reasonably high performance overall, with  accuracy of 83.45%, this makes sense as the test data set is imbalanced as it can be dominated by the majority class 'no'. For the 'no' class, sensitivity indicates how well the model identifies true 'no' instances. Here, it captures 84.57% of the actual 'no' cases.For the 'yes' class, specificity is lower, indicating that the model correctly identifies only 75.02% of 'yes' instances.
+
+The AUC of 0.8728 demonstrates good discriminatory ability between the two classes, indicating that the model generally performs well in distinguishing between "yes" and "no" outcomes.
+
+4. Use a decision tree (CART) to classify your data. Don’t forget to show your tree. Classify your train and test data. Show the confusion matrix of the results of the model on training data and testing data.
+Run the ROC graph and calculate AUC. Interpet your ROC graph and the calculated AUC. Please also discuss the threshold of the probability that you think is appropriate to use for this data. (50
+points)
+
+```{r}
+# Train the decision tree 
+dec_tree_model <- rpart(y ~ age + job + marital + education + default + balance + housing + loan + duration + campaign + pdays + previous + poutcome, 
+                    data = train_balanced, 
+                    method = "class")
+
+# Visualize the decision tree
+rpart.plot(dec_tree_model, main = "Decision Tree for Subscription Classification")
+
+# Model Evaluation
+# Ensure the predicted values are factors with the same levels as the actual values
+train_pred_prob <- predict(dec_tree_model, train_balanced, type = "prob")[,2]
+train_pred_tree <- ifelse(train_pred_prob > 0.3, "yes", "no")
+train_pred_tree <- factor(train_pred_tree, levels = levels(train_balanced$y))
+confusionMatrix(train_pred_tree, train_balanced$y)
+
+# For testing data, making sure the factor levels match as well
+test_pred_prob <- predict(dec_tree_model, testing_dataset, type = "prob")[,2]
+  test_pred_tree <- ifelse(test_pred_prob > 0.3, "yes", "no")
+test_pred_tree <- factor(test_pred_tree, levels = levels(testing_dataset$y))
+confusionMatrix(test_pred_tree, testing_dataset$y)
+
+
+# ROC curve 
+train_roc_dt <- roc(train_balanced$y, train_pred_prob)
+test_roc_dt <- roc(testing_dataset$y, test_pred_prob)
+
+roc_dt <- plot(roc_curve, main = "ROC Curve for Decision Tree Model", col = "blue", lwd = 2)
+
+# AUC
+test_auc_value <- auc(test_roc_dt)
+train_auc_value <- auc(train_roc_dt)
+```
+By lowering the threshold, the model is more likely to classify cases as "yes". This means that the model will flag more potential positives (the "yes"), which increases recall. By reducing the threshold to 0.3, the model is optimizing for recall at the cost of precision, which may be appropriate as we are trying to ensure that no potential positive cases are missed, even if it leads to more false alarms.
+
+AUC of 0.81 (close to 1) indicates a fairly well performing model.
+
+5. Adjust a hyperparameter to tune your CART model. Explain which parameter you will tune and why
+you chose it. Generate results for your new model and compare and contrast them with your original
+Decision tree results. 
+```{r}
+printcp(dec_tree_model)
+best_cp <- dec_tree_model$cptable[which.min(dec_tree_model$cptable[,"xerror"]), "CP"]
+pruned_model <- prune(dec_tree_model,cp = best_cp)
+
+rpart.plot(pruned_model, main = "Pruned Decision Tree for Subscription Classification")
+# apply pruned tree to test data
+test_pred_pruned <- predict(pruned_model, testing_dataset, type = "class")
+
+# Ensure the predicted values have the same factor levels as the actual test labels
+test_pred_pruned <- factor(test_pred_pruned, levels = levels(testing_dataset$y))
+
+# Confusion Matrix for Pruned Model on Test Data
+confusionMatrix(test_pred_pruned, testing_dataset$y)
+```
+
+Pruning selects the lowest complexity parameter value associated with a shorter tree that minimizes the cross-validated error. The pruned tree contains 5 splits. It looks like the pruned and unpruned model have mostly identical results, indicating that the unpruned model is well-tuned.
+
+6. Use a random forest model to classify your data using the original formula. Which variables are the
+most important variables in predicting? Classify your training data and testing data. After that,
+you need to create a confusion matrix, and calculate accuracy, precision, and recall. Run the ROC
+graph and calculate AUC. Interpret your ROC graph and the calculated AUC. Please also discuss the
+threshold of the probability that you think is appropriate to use for this data.
+```{r}
+forest <- randomForest(y ~ age + job + marital + education + default + balance + housing + loan + duration + campaign + pdays + previous + poutcome, 
+                    data = train_balanced, ntree=2000)
+# Variable importance
+varImpPlot(forest)
+
+# Predict on training and testing datasets
+train_pred_rf <- predict(forest, train_balanced)
+test_pred_rf <- predict(forest, testing_dataset, type = "prob")
+
+# Apply the 0.3 threshold
+test_pred_rf_prob <- predict(forest, testing_dataset, type = "prob") 
+test_pred_rf <- ifelse(test_pred_rf_prob[,2] >= 0.3, "yes", "no")
+test_pred_rf <- factor(test_pred_rf, levels = levels(testing_dataset$y))
+# Confusion Matrix for training and testing data
+train_conf_matrix <- confusionMatrix(train_pred_rf, train_balanced$y)
+test_conf_matrix <- confusionMatrix(test_pred_rf, testing_dataset$y)
+
+# ROC and AUC 
+train_pred_rf_prob <- predict(forest, train_balanced, type = "prob")
+train_roc_curve <- roc(train_balanced$y, train_pred_rf_prob[,2])
+train_auc_value <- auc(train_roc_curve)
+test_pred_rf_prob <- predict(forest, testing_dataset, type = "prob")
+test_roc_rf <- roc(testing_dataset$y, test_pred_rf_prob[,2])
+test_auc_rf <- auc(roc_curve)
+
+# Plot ROC curve
+roc_rf <- plot(roc_curve, main = "ROC Curve for Random Forest Model", col = "blue", lwd = 2)
+```
+It looks like the variable "duration" is the most important variable in predicting our outcome variable. The next most influential variables are "balance" and "age" but they are far behind the "duration" variable based on the plot.
+
+The training model correctly predicted 94.8% of the true negatives, and 95.25% of the true positives, with high (95%) precision rate as well as high (94.82%) negative predictive value. The testing model correctly predicted 70.1% of the true negatives, and 90.73% of the true positives. It has a very high (98.28%) precision rate but low (28.73%) negative predictive value. The AUC is 0.8859, implying good discrimination and predictability.
+
+A low threshold was chosen to increase the number of true positives in the model.
+
+7. Adjust a hyperparameter to tune your RF model. Explain which parameter you will tune and why
+you chose it. Generate results for your new model and compare and contrast them with your original
+random forest results
+
+```{r}
+# Define the tuning grid with possible values for mtry
+tune_grid <- expand.grid(mtry = c(2, 3, 4, 5, 6)) 
+
+# Train the Random Forest model with tuning using 10 k fold
+train_control <- trainControl(method = "cv", number = 5)
+
+rf_model <- train(y ~ age + job + marital + education + default + balance + housing + loan + duration + campaign + pdays + previous + poutcome,
+                  data = train_balanced,
+                  method = "rf",
+                  trControl = train_control,
+                  tuneGrid = tune_grid)
+
+# model using mtry = 5
+# Train the random forest model with mtry = 5
+forest_2 <- randomForest(y ~ age + job + marital + education + default + balance + housing + loan + duration + campaign + pdays + previous + poutcome, 
+                         data = train_balanced, mtry = 5)
+
+# Make predictions on the training set
+train_pred_rf_2 <- predict(forest_2, train_balanced)
+
+# Make predictions on the testing set (probabilities)
+test_pred_rf_2 <- predict(forest_2, testing_dataset, type = "prob")
+
+# Apply the 0.3 threshold to the predicted probabilities
+test_pred_rf_2_class <- ifelse(test_pred_rf_2[,2] >= 0.3, "yes", "no")
+test_pred_rf_2_class <- factor(test_pred_rf_2_class, levels = levels(testing_dataset$y))
+
+# Confusion Matrix for training and testing data
+train_conf_matrix_2 <- confusionMatrix(train_pred_rf_2, train_balanced$y)
+test_conf_matrix_2 <- confusionMatrix(test_pred_rf_2_class, testing_dataset$y)
+
+# Compute ROC and AUC 
+roc_curve <- roc(testing_dataset$y, test_pred_rf_2[, 2])  # Use probabilities from the model forest_2
+auc_value <- auc(roc_curve)
+
+# Plot ROC curve
+plot(roc_curve, main = "ROC Curve for Random Forest Model (mtry = 5)", col = "blue", lwd = 2)
+
+# Output AUC value
+auc_value
+```
+I chose to tune the mtry parameter because it controls the number of features that are considered when splitting each node in the decision trees. A larger value of mtry, as opposed to the original value 3, reduces bias, but increases variance. By considering more variables it captures different complex interactions between variables that might affect deposit subscriptions.
+
+8. Use a Categorical Boosting (CATBoost) model to classify your data using the original formula. Classify
+your training data and testing data. After that, you need to create a confusion matrix, and calculate
+accuracy, precision, and recall. Run the ROC graph and calculate AUC. Interpret your ROC graph
+and the calculated AUC.
+
+```{r}
+#install.packages('remotes')
+#remotes::install_url(
+  'https://github.com/catboost/catboost/releases/download/v1.2.7/catboost-R-darwin-universal2-1.2.7.tgz',
+  INSTALL_opts = c("--no-multiarch", "--no-test-load", "--no-staged-install")
+)
+
+#install.packages("devtools")
+library(catboost)
+
+training_dataset[] <- lapply(training_dataset, function(x) {
+  if (is.character(x)) as.factor(x) else x
+})
+
+testing_dataset[] <- lapply(testing_dataset, function(x) {
+  if (is.character(x)) as.factor(x) else x
+})
+
+
+# Convert the target variable to numeric (1 for "yes", 0 for "no")
+training_dataset$y <- ifelse(training_dataset$y == "yes", 1, 0)
+testing_dataset$y <- ifelse(testing_dataset$y == "yes", 1, 0)
+train_labels <- training_dataset$y
+test_labels <- testing_dataset$y
+
+# convert data to matrices
+train_data <- data.matrix(training_dataset[, -which(names(training_dataset) == "y")])
+test_data <- data.matrix(testing_dataset[, -which(names(testing_dataset) == "y")])
+
+
+# Identify categorical features and adjust for zero-indexing
+cat_features <- which(sapply(training_dataset[, -which(names(training_dataset) == "y")], is.factor)) - 1
+
+# restart R environment
+#rm(list = ls())
+
+# Create CatBoost pools with categorical features specified
+train_pool <- catboost.load_pool(data = train_data, label = train_labels, cat_features = cat_features)
+test_pool <- catboost.load_pool(data = test_data, label = test_labels, cat_features = cat_features)
+
+# Train the CatBoost model
+params <- list(loss_function = "Logloss", iterations = 100, depth = 6, learning_rate = 0.1, verbose = 1)
+model <- catboost.train(train_pool, params = params)
+
+# Predictions
+train_pred <- catboost.predict(model, train_pool, prediction_type = "Probability")
+test_pred <- catboost.predict(model, test_pool, prediction_type = "Probability")
+
+# Evaluate accuracy
+train_accuracy <- mean(train_pred == train_labels)
+test_accuracy <- mean(test_pred == test_labels)
+
+roc(test_labels, test_pred)
+roc_cat <- plot(roc_curve, main = "ROC for CatBoost", col = "blue", lwd =2)
+
+auc(roc_curve)
+```
+
+To compare the performance across all the different models, which evaluation metric (accuracy, precision,
+and recall) will be used to evaluate the models. Why do you pick this measure?
+
+Given that the model is imbalanced, accuracy may not be the best metric. A combination of the precision and recall metric, the F-1 score, would be an ideal metric for comparison as it balances both false positives and false negatives. AUC-ROC also provides a good measure to compare model performance across different probability thresholds for the dataset.
+
+Use the measure you chose in Question 9 to compare the performance of the different models. If we
+compare the performance based only on training data, which model performs the best? Create a
+table that shows all measures in 1 graphic
+
+```{r}
+model_comparison <- data.frame(
+ Model = c("Logistic Regression", "Decision Tree", "Random Forest", "CATBoost"),
+   AUC_ROC = c(0.8728,0.81,0.8859, 0.8809))
+model_comparison
+```
+The random forest appears to be the top performer on testing data.
