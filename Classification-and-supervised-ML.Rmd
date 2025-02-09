@@ -1,14 +1,28 @@
 ---
-title: "R Notebook"
+title: "Classification and Supervised Machine Learning"
 output: pdf_document
 editor_options: 
   chunk_output_type: inline
 ---
+Using Machine Learning to Predict Subscription to Bank Term Deposits for Clients 
 
-This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+Marketing to potential clients has always been a crucial challenge in attaining success for banking institutions. It’s not a surprise that banks usually deploy mediums such as social media, customer service, digital media and strategic partnerships to reach out to customers. But how can banks market to a specific location, demographic, and society with increased accuracy? With the inception of machine learning - reaching out to specific groups of people have been revolutionized by using data and analytics to provide detailed strategies to inform banks which customers are more likely to subscribe to a financial product. In this project on bank marketing with machine learning, I will explain how a particular Portuguese bank can use predictive analytics from data science to help prioritize customers which would subscribe to a bank deposit.
 
-Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+The data set is based off the direct marketing campaigns of a Portuguese banking institution. These marketing campaigns were based on phone calls. More than one contact to a client was required, in order to know if the product (bank term deposit) was subscribed by a client or not. The classification goal is to predict if a client will subscribe to the bank term deposit (yes/no).
 
+The dataset contains 21 columns including the output (y). I am going to discard the output column and use the remaining columns to find the most relatable independent variables (x) that will be able to predict if a customer will subscribe to a bank deposit or not.
+
+In this project I will demonstrate how to build a model predicting clients subscribing to a bank's term deposit in R using the following steps:
+
+-data exploration
+
+-feature engineering
+
+-building training/validation/test samples
+
+-model selection
+
+-model evaluation
 ```{r}
 library(readr)
 library(dplyr)
@@ -26,8 +40,7 @@ library(PRROC)
 #install.packages('randomForest')
 library(randomForest)
 ```
-Partition the data into training and testing datasets. What percentage of training data will you use?
-Please state the reason.
+Partitioning the data into training and testing datasets.
 ```{r}
 marketing <- read_csv("https://raw.githubusercontent.com/domrongphol/SPE487/master/Homework/HW2/bank-full.csv")
 set.seed(123)
@@ -80,9 +93,6 @@ The logit model has a reasonably high performance overall, with  accuracy of 83.
 
 The AUC of 0.8728 demonstrates good discriminatory ability between the two classes, indicating that the model generally performs well in distinguishing between "yes" and "no" outcomes.
 
-4. Use a decision tree (CART) to classify your data. Don’t forget to show your tree. Classify your train and test data. Show the confusion matrix of the results of the model on training data and testing data.
-Run the ROC graph and calculate AUC. Interpet your ROC graph and the calculated AUC. Please also discuss the threshold of the probability that you think is appropriate to use for this data. (50
-points)
 
 ```{r}
 # Train the decision tree 
@@ -121,9 +131,6 @@ By lowering the threshold, the model is more likely to classify cases as "yes". 
 
 AUC of 0.81 (close to 1) indicates a fairly well performing model.
 
-5. Adjust a hyperparameter to tune your CART model. Explain which parameter you will tune and why
-you chose it. Generate results for your new model and compare and contrast them with your original
-Decision tree results. 
 ```{r}
 printcp(dec_tree_model)
 best_cp <- dec_tree_model$cptable[which.min(dec_tree_model$cptable[,"xerror"]), "CP"]
@@ -142,11 +149,7 @@ confusionMatrix(test_pred_pruned, testing_dataset$y)
 
 Pruning selects the lowest complexity parameter value associated with a shorter tree that minimizes the cross-validated error. The pruned tree contains 5 splits. It looks like the pruned and unpruned model have mostly identical results, indicating that the unpruned model is well-tuned.
 
-6. Use a random forest model to classify your data using the original formula. Which variables are the
-most important variables in predicting? Classify your training data and testing data. After that,
-you need to create a confusion matrix, and calculate accuracy, precision, and recall. Run the ROC
-graph and calculate AUC. Interpret your ROC graph and the calculated AUC. Please also discuss the
-threshold of the probability that you think is appropriate to use for this data.
+
 ```{r}
 forest <- randomForest(y ~ age + job + marital + education + default + balance + housing + loan + duration + campaign + pdays + previous + poutcome, 
                     data = train_balanced, ntree=2000)
@@ -181,10 +184,6 @@ It looks like the variable "duration" is the most important variable in predicti
 The training model correctly predicted 94.8% of the true negatives, and 95.25% of the true positives, with high (95%) precision rate as well as high (94.82%) negative predictive value. The testing model correctly predicted 70.1% of the true negatives, and 90.73% of the true positives. It has a very high (98.28%) precision rate but low (28.73%) negative predictive value. The AUC is 0.8859, implying good discrimination and predictability.
 
 A low threshold was chosen to increase the number of true positives in the model.
-
-7. Adjust a hyperparameter to tune your RF model. Explain which parameter you will tune and why
-you chose it. Generate results for your new model and compare and contrast them with your original
-random forest results
 
 ```{r}
 # Define the tuning grid with possible values for mtry
@@ -292,15 +291,9 @@ roc_cat <- plot(roc_curve, main = "ROC for CatBoost", col = "blue", lwd =2)
 
 auc(roc_curve)
 ```
-
-To compare the performance across all the different models, which evaluation metric (accuracy, precision,
-and recall) will be used to evaluate the models. Why do you pick this measure?
+Model Evaluation
 
 Given that the model is imbalanced, accuracy may not be the best metric. A combination of the precision and recall metric, the F-1 score, would be an ideal metric for comparison as it balances both false positives and false negatives. AUC-ROC also provides a good measure to compare model performance across different probability thresholds for the dataset.
-
-Use the measure you chose in Question 9 to compare the performance of the different models. If we
-compare the performance based only on training data, which model performs the best? Create a
-table that shows all measures in 1 graphic
 
 ```{r}
 model_comparison <- data.frame(
